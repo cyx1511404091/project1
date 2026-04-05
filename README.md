@@ -1,6 +1,7 @@
 # EasyX Maze Game
 
-This project is a complete maze mini-game built with `C++` and the `EasyX` graphics library.
+This project is a complete maze mini-game built with `C++`.
+The checked-in runnable `MazeGame.exe` in this workspace was compiled with native Win32 graphics because EasyX was not available in the current build environment.
 
 ## Features
 
@@ -38,8 +39,8 @@ This project is a complete maze mini-game built with `C++` and the `EasyX` graph
 
 ## One-Click Launch
 
-After the project is built, you can click the generated `.exe` file directly to launch the game.
-If you prefer a helper file, you can also double-click [RunMazeGame.bat](/D:/codex/1/RunMazeGame.bat), which searches common Visual Studio output folders such as `x64\Release` and `Debug`.
+You can click [MazeGame.exe](/D:/codex/1/MazeGame.exe) directly to launch the game.
+If you prefer a helper file, you can also double-click [RunMazeGame.bat](/D:/codex/1/RunMazeGame.bat), which now prioritizes the root `MazeGame.exe`.
 
 ## Tunable Constants
 

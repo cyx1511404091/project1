@@ -1,11 +1,8 @@
 #include <algorithm>
 #include <chrono>
 #include <ctime>
-#include <graphics.h>
-#include <queue>
 #include <random>
 #include <string>
-#include <tchar.h>
 #include <vector>
 #include <windows.h>
 
@@ -18,7 +15,9 @@ namespace
     constexpr int kCellSize = 24;
     constexpr int kInfoBarHeight = 80;
     constexpr int kWallThickness = 2;
-    constexpr int kMoveCooldownMs = 85;
+    constexpr int kWindowWidth = kMazeCols * kCellSize;
+    constexpr int kWindowHeight = kMazeRows * kCellSize + kInfoBarHeight;
+    constexpr UINT_PTR kFrameTimerId = 1;
 
     constexpr COLORREF kWallColor = RGB(64, 64, 64);
     constexpr COLORREF kFloorColor = RGB(241, 232, 208);
@@ -28,9 +27,6 @@ namespace
     constexpr COLORREF kHintColor = RGB(245, 208, 66);
     constexpr COLORREF kTextColor = RGB(32, 32, 32);
     constexpr COLORREF kInfoBgColor = RGB(225, 217, 193);
-
-    constexpr int kWindowWidth = kMazeCols * kCellSize;
-    constexpr int kWindowHeight = kMazeRows * kCellSize + kInfoBarHeight;
 
     enum Direction
     {
@@ -73,38 +69,10 @@ namespace
             resetGame();
         }
 
-        void run()
+        void setWindow(HWND hwnd)
         {
-            initgraph(kWindowWidth, kWindowHeight);
-            BeginBatchDraw();
-
-            while (running_)
-            {
-                handleInput();
-                draw();
-                Sleep(16);
-            }
-
-            EndBatchDraw();
-            closegraph();
+            hwnd_ = hwnd;
         }
-
-    private:
-        vector<vector<Cell>> maze_;
-        mt19937 rng_;
-        Point player_;
-        Point startPoint_;
-        Point goalPoint_;
-        vector<Point> shortestPath_;
-
-        bool running_ = true;
-        bool showHint_ = false;
-        bool gameWon_ = false;
-        int steps_ = 0;
-
-        chrono::steady_clock::time_point startTime_;
-        chrono::steady_clock::time_point winTime_;
-        chrono::steady_clock::time_point lastMoveTime_ = chrono::steady_clock::now();
 
         void resetGame()
         {
@@ -116,26 +84,112 @@ namespace
                 }
             }
 
-            generateMaze();
+            generateByDFS(startPoint_.row, startPoint_.col);
             player_ = startPoint_;
             steps_ = 0;
             showHint_ = false;
             gameWon_ = false;
             startTime_ = chrono::steady_clock::now();
             winTime_ = startTime_;
-            lastMoveTime_ = chrono::steady_clock::now();
             updateShortestPath();
         }
 
-        void generateMaze()
+        void toggleHint()
         {
-            generateByDFS(startPoint_.row, startPoint_.col);
+            showHint_ = !showHint_;
+            updateShortestPath();
+        }
+
+        void tryMove(Direction dir)
+        {
+            if (gameWon_ || maze_[player_.row][player_.col].walls[dir])
+            {
+                return;
+            }
+
+            const int nextRow = player_.row + kRowOffset[dir];
+            const int nextCol = player_.col + kColOffset[dir];
+            if (nextRow < 0 || nextRow >= kMazeRows || nextCol < 0 || nextCol >= kMazeCols)
+            {
+                return;
+            }
+
+            player_.row = nextRow;
+            player_.col = nextCol;
+            ++steps_;
+            updateShortestPath();
+
+            if (player_ == goalPoint_)
+            {
+                gameWon_ = true;
+                winTime_ = chrono::steady_clock::now();
+                const wstring message = L"Victory!\n\nTotal Steps: " + to_wstring(steps_)
+                    + L"\nTotal Time: " + to_wstring(getElapsedSeconds())
+                    + L" s\n\nPress R to generate a new maze.";
+                MessageBoxW(hwnd_, message.c_str(), L"Maze Victory", MB_OK | MB_ICONINFORMATION);
+            }
+        }
+
+        void draw(HDC targetDc) const
+        {
+            HBRUSH floorBrush = CreateSolidBrush(kFloorColor);
+            RECT clientRect{ 0, 0, kWindowWidth, kWindowHeight };
+            FillRect(targetDc, &clientRect, floorBrush);
+            DeleteObject(floorBrush);
+
+            HBRUSH infoBrush = CreateSolidBrush(kInfoBgColor);
+            RECT infoRect{ 0, 0, kWindowWidth, kInfoBarHeight };
+            FillRect(targetDc, &infoRect, infoBrush);
+            DeleteObject(infoBrush);
+
+            SetBkMode(targetDc, TRANSPARENT);
+            SetTextColor(targetDc, kTextColor);
+
+            HFONT titleFont = CreateFontW(24, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+                OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Consolas");
+            HFONT bodyFont = CreateFontW(18, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+                OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Consolas");
+            HFONT oldFont = static_cast<HFONT>(SelectObject(targetDc, titleFont));
+
+            const wstring status = L"Steps: " + to_wstring(steps_) + L"   Time: " + to_wstring(getElapsedSeconds()) + L" s";
+            TextOutW(targetDc, 16, 12, status.c_str(), static_cast<int>(status.size()));
+
+            SelectObject(targetDc, bodyFont);
+            const wchar_t* hintText = L"Arrow Keys: Move    H: Hint On/Off    R: Regenerate    ESC: Exit";
+            TextOutW(targetDc, 16, 44, hintText, lstrlenW(hintText));
+
+            drawCells(targetDc);
+            drawWalls(targetDc);
+
+            SelectObject(targetDc, oldFont);
+            DeleteObject(titleFont);
+            DeleteObject(bodyFont);
+        }
+
+    private:
+        vector<vector<Cell>> maze_;
+        mt19937 rng_;
+        Point player_;
+        Point startPoint_;
+        Point goalPoint_;
+        vector<Point> shortestPath_;
+        HWND hwnd_ = nullptr;
+
+        bool showHint_ = false;
+        bool gameWon_ = false;
+        int steps_ = 0;
+        chrono::steady_clock::time_point startTime_;
+        chrono::steady_clock::time_point winTime_;
+
+        int getElapsedSeconds() const
+        {
+            const auto endTime = gameWon_ ? winTime_ : chrono::steady_clock::now();
+            return static_cast<int>(chrono::duration_cast<chrono::seconds>(endTime - startTime_).count());
         }
 
         void generateByDFS(int row, int col)
         {
             maze_[row][col].visited = true;
-
             vector<int> directions = { Up, Right, Down, Left };
             shuffle(directions.begin(), directions.end(), rng_);
 
@@ -143,8 +197,7 @@ namespace
             {
                 const int nextRow = row + kRowOffset[dir];
                 const int nextCol = col + kColOffset[dir];
-
-                if (!isInside(nextRow, nextCol) || maze_[nextRow][nextCol].visited)
+                if (nextRow < 0 || nextRow >= kMazeRows || nextCol < 0 || nextCol >= kMazeCols || maze_[nextRow][nextCol].visited)
                 {
                     continue;
                 }
@@ -153,120 +206,6 @@ namespace
                 maze_[nextRow][nextCol].walls[kOpposite[dir]] = false;
                 generateByDFS(nextRow, nextCol);
             }
-        }
-
-        bool isInside(int row, int col) const
-        {
-            return row >= 0 && row < kMazeRows && col >= 0 && col < kMazeCols;
-        }
-
-        bool canMove(Direction dir) const
-        {
-            if (maze_[player_.row][player_.col].walls[dir])
-            {
-                return false;
-            }
-
-            const int nextRow = player_.row + kRowOffset[dir];
-            const int nextCol = player_.col + kColOffset[dir];
-            return isInside(nextRow, nextCol);
-        }
-
-        void handleInput()
-        {
-            if (GetAsyncKeyState(VK_ESCAPE) & 0x8000)
-            {
-                running_ = false;
-                return;
-            }
-
-            static bool rPressed = false;
-            static bool hPressed = false;
-
-            const bool nowRPressed = (GetAsyncKeyState('R') & 0x8000) != 0;
-            if (nowRPressed && !rPressed)
-            {
-                resetGame();
-            }
-            rPressed = nowRPressed;
-
-            const bool nowHPressed = (GetAsyncKeyState('H') & 0x8000) != 0;
-            if (nowHPressed && !hPressed)
-            {
-                showHint_ = !showHint_;
-                updateShortestPath();
-            }
-            hPressed = nowHPressed;
-
-            if (gameWon_)
-            {
-                return;
-            }
-
-            const auto now = chrono::steady_clock::now();
-            const auto elapsed = chrono::duration_cast<chrono::milliseconds>(now - lastMoveTime_).count();
-            if (elapsed < kMoveCooldownMs)
-            {
-                return;
-            }
-
-            Direction dir;
-            bool hasMove = false;
-
-            if (GetAsyncKeyState(VK_UP) & 0x8000)
-            {
-                dir = Up;
-                hasMove = true;
-            }
-            else if (GetAsyncKeyState(VK_RIGHT) & 0x8000)
-            {
-                dir = Right;
-                hasMove = true;
-            }
-            else if (GetAsyncKeyState(VK_DOWN) & 0x8000)
-            {
-                dir = Down;
-                hasMove = true;
-            }
-            else if (GetAsyncKeyState(VK_LEFT) & 0x8000)
-            {
-                dir = Left;
-                hasMove = true;
-            }
-
-            if (!hasMove || !canMove(dir))
-            {
-                return;
-            }
-
-            player_.row += kRowOffset[dir];
-            player_.col += kColOffset[dir];
-            ++steps_;
-            lastMoveTime_ = now;
-            updateShortestPath();
-
-            if (player_ == goalPoint_)
-            {
-                gameWon_ = true;
-                winTime_ = chrono::steady_clock::now();
-                const int totalSeconds = getElapsedSeconds();
-
-                wstring message = L"Victory!\n\nTotal Steps: " + to_wstring(steps_)
-                    + L"\nTotal Time: " + to_wstring(totalSeconds)
-                    + L" s\n\nPress R to generate a new maze.";
-                MessageBox(GetHWnd(), message.c_str(), _T("Maze Victory"), MB_OK | MB_ICONINFORMATION);
-            }
-        }
-
-        int getElapsedSeconds() const
-        {
-            const auto endTime = gameWon_ ? winTime_ : chrono::steady_clock::now();
-            return static_cast<int>(chrono::duration_cast<chrono::seconds>(endTime - startTime_).count());
-        }
-
-        wstring buildStatusText() const
-        {
-            return L"Steps: " + to_wstring(steps_) + L"   Time: " + to_wstring(getElapsedSeconds()) + L" s";
         }
 
         void updateShortestPath()
@@ -279,16 +218,13 @@ namespace
 
             vector<vector<bool>> visited(kMazeRows, vector<bool>(kMazeCols, false));
             vector<vector<Point>> previous(kMazeRows, vector<Point>(kMazeCols, { -1, -1 }));
-            queue<Point> q;
-
-            q.push(player_);
+            vector<Point> bfsQueue;
+            bfsQueue.push_back(player_);
             visited[player_.row][player_.col] = true;
 
-            while (!q.empty())
+            for (size_t head = 0; head < bfsQueue.size(); ++head)
             {
-                Point current = q.front();
-                q.pop();
-
+                const Point current = bfsQueue[head];
                 if (current == goalPoint_)
                 {
                     break;
@@ -303,15 +239,14 @@ namespace
 
                     const int nextRow = current.row + kRowOffset[dir];
                     const int nextCol = current.col + kColOffset[dir];
-
-                    if (!isInside(nextRow, nextCol) || visited[nextRow][nextCol])
+                    if (nextRow < 0 || nextRow >= kMazeRows || nextCol < 0 || nextCol >= kMazeCols || visited[nextRow][nextCol])
                     {
                         continue;
                     }
 
                     visited[nextRow][nextCol] = true;
                     previous[nextRow][nextCol] = current;
-                    q.push({ nextRow, nextCol });
+                    bfsQueue.push_back({ nextRow, nextCol });
                 }
             }
 
@@ -332,93 +267,43 @@ namespace
             reverse(shortestPath_.begin(), shortestPath_.end());
         }
 
-        void draw()
+        void fillCell(HDC dc, const Point& point, COLORREF color, int margin) const
         {
-            cleardevice();
-            drawInfoBar();
-            drawMaze();
-            FlushBatchDraw();
+            RECT rect{
+                point.col * kCellSize + margin,
+                point.row * kCellSize + kInfoBarHeight + margin,
+                (point.col + 1) * kCellSize - margin,
+                (point.row + 1) * kCellSize + kInfoBarHeight - margin
+            };
+            HBRUSH brush = CreateSolidBrush(color);
+            FillRect(dc, &rect, brush);
+            DeleteObject(brush);
         }
 
-        void drawInfoBar() const
+        void drawCells(HDC dc) const
         {
-            setfillcolor(kInfoBgColor);
-            solidrectangle(0, 0, kWindowWidth, kInfoBarHeight);
-
-            setbkmode(TRANSPARENT);
-            settextcolor(kTextColor);
-            settextstyle(24, 0, _T("Consolas"));
-
-            const wstring status = buildStatusText();
-            outtextxy(16, 12, status.c_str());
-
-            settextstyle(18, 0, _T("Consolas"));
-            const wchar_t* hint = L"Arrow Keys: Move    H: Hint On/Off    R: Regenerate    ESC: Exit";
-            outtextxy(16, 44, hint);
-        }
-
-        void drawMaze() const
-        {
-            setfillcolor(kFloorColor);
-            solidrectangle(0, kInfoBarHeight, kWindowWidth, kWindowHeight);
-
-            drawSpecialCell(startPoint_, kStartColor);
-            drawSpecialCell(goalPoint_, kGoalColor);
+            fillCell(dc, startPoint_, kStartColor, 4);
+            fillCell(dc, goalPoint_, kGoalColor, 4);
 
             if (showHint_)
             {
-                drawHintPath();
-            }
-
-            drawPlayer();
-            drawWalls();
-        }
-
-        void drawSpecialCell(const Point& point, COLORREF color) const
-        {
-            const int left = point.col * kCellSize + 4;
-            const int top = point.row * kCellSize + kInfoBarHeight + 4;
-            const int right = left + kCellSize - 8;
-            const int bottom = top + kCellSize - 8;
-
-            setfillcolor(color);
-            solidrectangle(left, top, right, bottom);
-        }
-
-        void drawHintPath() const
-        {
-            setfillcolor(kHintColor);
-
-            for (const Point& point : shortestPath_)
-            {
-                if (point == player_ || point == goalPoint_)
+                for (const Point& point : shortestPath_)
                 {
-                    continue;
+                    if (point == player_ || point == goalPoint_)
+                    {
+                        continue;
+                    }
+                    fillCell(dc, point, kHintColor, 7);
                 }
-
-                const int left = point.col * kCellSize + 7;
-                const int top = point.row * kCellSize + kInfoBarHeight + 7;
-                const int right = left + kCellSize - 14;
-                const int bottom = top + kCellSize - 14;
-                solidrectangle(left, top, right, bottom);
             }
+
+            fillCell(dc, player_, kPlayerColor, 5);
         }
 
-        void drawPlayer() const
+        void drawWalls(HDC dc) const
         {
-            const int left = player_.col * kCellSize + 5;
-            const int top = player_.row * kCellSize + kInfoBarHeight + 5;
-            const int right = left + kCellSize - 10;
-            const int bottom = top + kCellSize - 10;
-
-            setfillcolor(kPlayerColor);
-            solidrectangle(left, top, right, bottom);
-        }
-
-        void drawWalls() const
-        {
-            setlinecolor(kWallColor);
-            setlinestyle(PS_SOLID, kWallThickness);
+            HPEN pen = CreatePen(PS_SOLID, kWallThickness, kWallColor);
+            HPEN oldPen = static_cast<HPEN>(SelectObject(dc, pen));
 
             for (int row = 0; row < kMazeRows; ++row)
             {
@@ -426,33 +311,155 @@ namespace
                 {
                     const int x = col * kCellSize;
                     const int y = row * kCellSize + kInfoBarHeight;
-
                     const Cell& cell = maze_[row][col];
+
                     if (cell.walls[Up])
                     {
-                        line(x, y, x + kCellSize, y);
+                        MoveToEx(dc, x, y, nullptr);
+                        LineTo(dc, x + kCellSize, y);
                     }
                     if (cell.walls[Right])
                     {
-                        line(x + kCellSize, y, x + kCellSize, y + kCellSize);
+                        MoveToEx(dc, x + kCellSize, y, nullptr);
+                        LineTo(dc, x + kCellSize, y + kCellSize);
                     }
                     if (cell.walls[Down])
                     {
-                        line(x, y + kCellSize, x + kCellSize, y + kCellSize);
+                        MoveToEx(dc, x, y + kCellSize, nullptr);
+                        LineTo(dc, x + kCellSize, y + kCellSize);
                     }
                     if (cell.walls[Left])
                     {
-                        line(x, y, x, y + kCellSize);
+                        MoveToEx(dc, x, y, nullptr);
+                        LineTo(dc, x, y + kCellSize);
                     }
                 }
             }
+
+            SelectObject(dc, oldPen);
+            DeleteObject(pen);
         }
     };
+
+    MazeGame g_game;
+
+    LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+    {
+        switch (message)
+        {
+        case WM_CREATE:
+            g_game.setWindow(hwnd);
+            SetTimer(hwnd, kFrameTimerId, 16, nullptr);
+            return 0;
+
+        case WM_TIMER:
+            InvalidateRect(hwnd, nullptr, FALSE);
+            return 0;
+
+        case WM_KEYDOWN:
+            switch (wParam)
+            {
+            case VK_UP:
+                g_game.tryMove(Up);
+                break;
+            case VK_RIGHT:
+                g_game.tryMove(Right);
+                break;
+            case VK_DOWN:
+                g_game.tryMove(Down);
+                break;
+            case VK_LEFT:
+                g_game.tryMove(Left);
+                break;
+            case 'H':
+                g_game.toggleHint();
+                break;
+            case 'R':
+                g_game.resetGame();
+                break;
+            case VK_ESCAPE:
+                DestroyWindow(hwnd);
+                break;
+            default:
+                break;
+            }
+            InvalidateRect(hwnd, nullptr, FALSE);
+            return 0;
+
+        case WM_PAINT:
+            {
+                PAINTSTRUCT ps{};
+                HDC hdc = BeginPaint(hwnd, &ps);
+                HDC memDc = CreateCompatibleDC(hdc);
+                HBITMAP bitmap = CreateCompatibleBitmap(hdc, kWindowWidth, kWindowHeight);
+                HBITMAP oldBitmap = static_cast<HBITMAP>(SelectObject(memDc, bitmap));
+
+                g_game.draw(memDc);
+                BitBlt(hdc, 0, 0, kWindowWidth, kWindowHeight, memDc, 0, 0, SRCCOPY);
+
+                SelectObject(memDc, oldBitmap);
+                DeleteObject(bitmap);
+                DeleteDC(memDc);
+                EndPaint(hwnd, &ps);
+                return 0;
+            }
+
+        case WM_DESTROY:
+            KillTimer(hwnd, kFrameTimerId);
+            PostQuitMessage(0);
+            return 0;
+
+        default:
+            return DefWindowProcW(hwnd, message, wParam, lParam);
+        }
+    }
 }
 
-int main()
+int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
 {
-    MazeGame game;
-    game.run();
+    const wchar_t kClassName[] = L"MazeGameWindowClass";
+
+    WNDCLASSW wc{};
+    wc.lpfnWndProc = WindowProc;
+    wc.hInstance = instance;
+    wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
+    wc.hIcon = LoadIconW(instance, MAKEINTRESOURCEW(101));
+    wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+    wc.lpszClassName = kClassName;
+    RegisterClassW(&wc);
+
+    RECT rect{ 0, 0, kWindowWidth, kWindowHeight };
+    AdjustWindowRect(&rect, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX, FALSE);
+
+    HWND hwnd = CreateWindowExW(
+        0,
+        kClassName,
+        L"Maze Game",
+        WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
+        CW_USEDEFAULT,
+        CW_USEDEFAULT,
+        rect.right - rect.left,
+        rect.bottom - rect.top,
+        nullptr,
+        nullptr,
+        instance,
+        nullptr
+    );
+
+    if (hwnd == nullptr)
+    {
+        return 0;
+    }
+
+    ShowWindow(hwnd, showCommand);
+    UpdateWindow(hwnd);
+
+    MSG msg{};
+    while (GetMessageW(&msg, nullptr, 0, 0))
+    {
+        TranslateMessage(&msg);
+        DispatchMessageW(&msg);
+    }
+
     return 0;
 }
