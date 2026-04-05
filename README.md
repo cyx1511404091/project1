@@ -1,4 +1,4 @@
-﻿# Maze Adventure 3D
+﻿# Maze Adventure FP
 
 This project is a complete maze mini-game built with `C++`.
 The checked-in runnable [MazeGame.exe](/D:/codex/1/MazeGame.exe) in this workspace is compiled with native Win32 graphics because EasyX was not available in the current build environment.
@@ -7,11 +7,10 @@ The checked-in runnable [MazeGame.exe](/D:/codex/1/MazeGame.exe) in this workspa
 
 - Start screen with `LOW`, `MEDIUM`, and `HIGH` difficulty selection
 - DFS random perfect maze generation with guaranteed solvable layout
-- Pseudo-3D isometric maze presentation
+- Double-buffered first-person maze presentation to prevent flashing
+- First-person play with visible left and right arms
 - Start cell in the top-left corner and goal door in the bottom-right corner
-- Long-press arrow-key movement with strict wall collision
-- Small modeled player character instead of a blue point marker
-- Door model at the goal
+- Long-press movement and turning with strict wall collision
 - Reachable stars placed in the maze, each worth `1` score
 - Spend `5` score to unlock a partial route hint from the current position
 - `H` to show or hide the purchased partial hint overlay
@@ -23,10 +22,10 @@ The checked-in runnable [MazeGame.exe](/D:/codex/1/MazeGame.exe) in this workspa
 
 ## Visual Style
 
-- Walls: dark stone gray
-- Floor: warm light beige
-- Player: blue-clothed character model
-- Start: green
+- Sky: light blue
+- Corridor walls: dark stone gray
+- Floor: warm brown
+- Player view: blue sleeves with visible arms
 - Goal: door model
 - Hint path: yellow
 - Stars: gold
@@ -49,10 +48,9 @@ If you prefer a helper file, you can also double-click [RunMazeGame.bat](/D:/cod
 You can change these values near the top of [src/main.cpp](/D:/codex/1/src/main.cpp):
 
 - `kMoveIntervalMs`
+- `kTurnIntervalMs`
 - `kHintCost`
-- `kIsoTileHalfWidth`
-- `kIsoTileHalfHeight`
 
 ## Notes
 
-The DFS generator creates a connected perfect maze, so the goal is always reachable. The hint is generated with BFS from the player's current location after purchasing it with score, and the current build uses a pseudo-3D isometric presentation rather than a true 3D engine.
+The DFS generator creates a connected perfect maze, so the goal is always reachable. The hint is generated with BFS from the player's current location after purchasing it with score, and the current build uses a first-person corridor renderer rather than a full 3D engine.
