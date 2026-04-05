@@ -4,6 +4,10 @@ setlocal
 set "ROOT=%~dp0"
 set "GAME_EXE="
 
+if exist "%ROOT%MazeGame.exe" (
+    set "GAME_EXE=%ROOT%MazeGame.exe"
+)
+
 for %%F in (
     "%ROOT%x64\Release\*.exe"
     "%ROOT%Release\*.exe"
