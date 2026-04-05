@@ -1,6 +1,7 @@
 ﻿#include <algorithm>
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <ctime>
 #include <random>
 #include <sstream>
@@ -20,6 +21,9 @@ namespace
     constexpr int kMoveIntervalMs = 130;
     constexpr int kTurnIntervalMs = 150;
     constexpr int kHintCost = 5;
+    constexpr double kTurnDecayPerFrame = 0.12;
+    constexpr double kJumpGravity = 0.85;
+    constexpr double kJumpImpulse = -10.5;
 
     constexpr COLORREF kSkyColor = RGB(192, 219, 244);
     constexpr COLORREF kFloorColor = RGB(140, 120, 92);
@@ -165,6 +169,27 @@ namespace
             }
 
             const auto now = chrono::steady_clock::now();
+            if (fabs(turnOffset_) > 0.01)
+            {
+                turnOffset_ *= (1.0 - kTurnDecayPerFrame);
+                if (fabs(turnOffset_) < 0.01)
+                {
+                    turnOffset_ = 0.0;
+                }
+            }
+
+            if (isJumping_)
+            {
+                jumpVelocity_ += kJumpGravity;
+                jumpOffset_ += jumpVelocity_;
+                if (jumpOffset_ >= 0.0)
+                {
+                    jumpOffset_ = 0.0;
+                    jumpVelocity_ = 0.0;
+                    isJumping_ = false;
+                }
+            }
+
             if (heldAction_ != ActionKey::None)
             {
                 const int interval = (heldAction_ == ActionKey::TurnLeft || heldAction_ == ActionKey::TurnRight)
@@ -230,6 +255,23 @@ namespace
                 return;
             }
 
+            if (key == VK_SPACE)
+            {
+                if (!isJumping_)
+                {
+                    isJumping_ = true;
+                    jumpVelocity_ = kJumpImpulse;
+                    jumpOffset_ = -1.0;
+                }
+                return;
+            }
+
+            if (key == VK_CONTROL)
+            {
+                isCrouching_ = true;
+                return;
+            }
+
             const ActionKey action = TranslateActionKey(key);
             if (action != ActionKey::None)
             {
@@ -245,6 +287,12 @@ namespace
 
         void OnKeyUp(WPARAM key)
         {
+            if (key == VK_CONTROL)
+            {
+                isCrouching_ = false;
+                return;
+            }
+
             const ActionKey action = TranslateActionKey(key);
             if (action == ActionKey::None)
             {
@@ -309,6 +357,11 @@ namespace
         bool actionHeld_[4] = { false, false, false, false };
         chrono::steady_clock::time_point startTime_{};
         chrono::steady_clock::time_point lastActionTime_{};
+        double turnOffset_ = 0.0;
+        double jumpOffset_ = 0.0;
+        double jumpVelocity_ = 0.0;
+        bool isJumping_ = false;
+        bool isCrouching_ = false;
         void StartNewGame(int difficultyIndex)
         {
             selectedDifficultyIndex_ = difficultyIndex;
@@ -329,6 +382,11 @@ namespace
             activeHintCells_.clear();
             startTime_ = chrono::steady_clock::now();
             lastActionTime_ = startTime_;
+            turnOffset_ = 0.0;
+            jumpOffset_ = 0.0;
+            jumpVelocity_ = 0.0;
+            isJumping_ = false;
+            isCrouching_ = false;
         }
 
         void UpdateMenuLayout()
@@ -409,10 +467,12 @@ namespace
                 break;
             case ActionKey::TurnLeft:
                 facing_ = static_cast<Direction>((facing_ + 3) % 4);
+                turnOffset_ = 1.0;
                 lastActionTime_ = chrono::steady_clock::now();
                 break;
             case ActionKey::TurnRight:
                 facing_ = static_cast<Direction>((facing_ + 1) % 4);
+                turnOffset_ = -1.0;
                 lastActionTime_ = chrono::steady_clock::now();
                 break;
             default:
@@ -748,7 +808,7 @@ namespace
             const wstring controls =
                 screenState_ == ScreenState::Menu
                 ? L"Choose a difficulty to start."
-                : L"Up/Down: move  Left/Right: turn  J: buy partial hint  H: show/hide  R: restart  ESC: quit";
+                : L"Up/Down: move  Left/Right: turn  Space: jump  Ctrl: crouch  J: buy hint  H: show/hide  R: restart";
             TextOutW(hdc, 520, 56, controls.c_str(), static_cast<int>(controls.size()));
 
             SelectObject(hdc, oldFont);
@@ -870,8 +930,10 @@ namespace
         void DrawFirstPersonView(HDC hdc)
         {
             RECT viewRect{ 72, kInfoBarHeight + 36, clientWidth_ - 280, clientHeight_ - 54 };
-            RECT skyRect{ viewRect.left, viewRect.top, viewRect.right, (viewRect.top + viewRect.bottom) / 2 };
-            RECT groundRect{ viewRect.left, (viewRect.top + viewRect.bottom) / 2, viewRect.right, viewRect.bottom };
+            const int cameraYOffset = static_cast<int>(lround(jumpOffset_ + (isCrouching_ ? 46.0 : 0.0)));
+            const int turnShift = static_cast<int>(lround(turnOffset_ * 140.0));
+            RECT skyRect{ viewRect.left, viewRect.top + cameraYOffset, viewRect.right, (viewRect.top + viewRect.bottom) / 2 + cameraYOffset };
+            RECT groundRect{ viewRect.left, (viewRect.top + viewRect.bottom) / 2 + cameraYOffset, viewRect.right, viewRect.bottom + cameraYOffset };
             FillRectColor(hdc, skyRect, kSkyColor);
             FillRectColor(hdc, groundRect, kFloorColor);
 
@@ -885,10 +947,10 @@ namespace
 
             const vector<CorridorStep> steps = BuildCorridorSteps();
             const array<RECT, 4> layerRects = {
-                RECT{ viewRect.left + 70, viewRect.top + 44, viewRect.right - 70, viewRect.bottom - 64 },
-                RECT{ viewRect.left + 180, viewRect.top + 100, viewRect.right - 180, viewRect.bottom - 118 },
-                RECT{ viewRect.left + 280, viewRect.top + 155, viewRect.right - 280, viewRect.bottom - 166 },
-                RECT{ viewRect.left + 360, viewRect.top + 205, viewRect.right - 360, viewRect.bottom - 210 }
+                RECT{ viewRect.left + 70 + turnShift, viewRect.top + 44 + cameraYOffset, viewRect.right - 70 + turnShift, viewRect.bottom - 64 + cameraYOffset },
+                RECT{ viewRect.left + 180 + turnShift, viewRect.top + 100 + cameraYOffset, viewRect.right - 180 + turnShift, viewRect.bottom - 118 + cameraYOffset },
+                RECT{ viewRect.left + 280 + turnShift, viewRect.top + 155 + cameraYOffset, viewRect.right - 280 + turnShift, viewRect.bottom - 166 + cameraYOffset },
+                RECT{ viewRect.left + 360 + turnShift, viewRect.top + 205 + cameraYOffset, viewRect.right - 360 + turnShift, viewRect.bottom - 210 + cameraYOffset }
             };
 
             for (int depth = static_cast<int>(steps.size()) - 1; depth >= 0; --depth)
@@ -900,10 +962,10 @@ namespace
                 if (step.leftWall)
                 {
                     POINT leftWall[4] = {
-                        { viewRect.left, viewRect.top },
+                        { viewRect.left + turnShift, viewRect.top + cameraYOffset },
                         { rect.left, rect.top },
                         { rect.left, rect.bottom },
-                        { viewRect.left, viewRect.bottom }
+                        { viewRect.left + turnShift, viewRect.bottom + cameraYOffset }
                     };
                     DrawPolygon(hdc, leftWall, 4, wallColor, RGB(48, 48, 56));
                 }
@@ -911,10 +973,10 @@ namespace
                 if (step.rightWall)
                 {
                     POINT rightWall[4] = {
-                        { viewRect.right, viewRect.top },
+                        { viewRect.right + turnShift, viewRect.top + cameraYOffset },
                         { rect.right, rect.top },
                         { rect.right, rect.bottom },
-                        { viewRect.right, viewRect.bottom }
+                        { viewRect.right + turnShift, viewRect.bottom + cameraYOffset }
                     };
                     DrawPolygon(hdc, rightWall, 4, wallColor, RGB(48, 48, 56));
                 }
@@ -959,7 +1021,7 @@ namespace
                 OUT_OUTLINE_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, VARIABLE_PITCH, L"Segoe UI");
             HGDIOBJ oldFont = SelectObject(hdc, font);
             const wstring facingText = FacingText();
-            TextOutW(hdc, viewRect.left + 18, viewRect.top + 14, facingText.c_str(), static_cast<int>(facingText.size()));
+            TextOutW(hdc, viewRect.left + 18, viewRect.top + 14 + cameraYOffset, facingText.c_str(), static_cast<int>(facingText.size()));
             SelectObject(hdc, oldFont);
             DeleteObject(font);
         }
@@ -993,30 +1055,31 @@ namespace
 
         void DrawPlayerHands(HDC hdc)
         {
-            const int baseY = clientHeight_ - 120;
+            const int baseY = clientHeight_ - 120 + static_cast<int>(lround(jumpOffset_ + (isCrouching_ ? 46.0 : 0.0)));
+            const int swayX = static_cast<int>(lround(turnOffset_ * 80.0));
             POINT leftSleeve[4] = {
-                { 120, baseY + 18 },
-                { 250, baseY - 34 },
-                { 330, baseY + 76 },
-                { 176, baseY + 118 }
+                { 120 + swayX, baseY + 18 },
+                { 250 + swayX, baseY - 34 },
+                { 330 + swayX, baseY + 76 },
+                { 176 + swayX, baseY + 118 }
             };
             POINT rightSleeve[4] = {
-                { clientWidth_ - 120, baseY + 18 },
-                { clientWidth_ - 250, baseY - 34 },
-                { clientWidth_ - 330, baseY + 76 },
-                { clientWidth_ - 176, baseY + 118 }
+                { clientWidth_ - 120 + swayX, baseY + 18 },
+                { clientWidth_ - 250 + swayX, baseY - 34 },
+                { clientWidth_ - 330 + swayX, baseY + 76 },
+                { clientWidth_ - 176 + swayX, baseY + 118 }
             };
             POINT leftHand[4] = {
-                { 266, baseY + 44 },
-                { 325, baseY + 26 },
-                { 350, baseY + 84 },
-                { 290, baseY + 104 }
+                { 266 + swayX, baseY + 44 },
+                { 325 + swayX, baseY + 26 },
+                { 350 + swayX, baseY + 84 },
+                { 290 + swayX, baseY + 104 }
             };
             POINT rightHand[4] = {
-                { clientWidth_ - 266, baseY + 44 },
-                { clientWidth_ - 325, baseY + 26 },
-                { clientWidth_ - 350, baseY + 84 },
-                { clientWidth_ - 290, baseY + 104 }
+                { clientWidth_ - 266 + swayX, baseY + 44 },
+                { clientWidth_ - 325 + swayX, baseY + 26 },
+                { clientWidth_ - 350 + swayX, baseY + 84 },
+                { clientWidth_ - 290 + swayX, baseY + 104 }
             };
             DrawPolygon(hdc, leftSleeve, 4, kSleeveColor, RGB(32, 62, 118));
             DrawPolygon(hdc, rightSleeve, 4, kSleeveColor, RGB(32, 62, 118));
@@ -1077,6 +1140,34 @@ namespace
                     if (row == playerRow_ && col == playerCol_)
                     {
                         FillRectColor(hdc, cellRect, kMiniPlayerColor);
+                        const int centerX = (cellRect.left + cellRect.right) / 2;
+                        const int centerY = (cellRect.top + cellRect.bottom) / 2;
+                        const int radius = max(3, cellSize / 2);
+                        POINT arrow[3];
+                        switch (facing_)
+                        {
+                        case North:
+                            arrow[0] = { centerX, centerY - radius };
+                            arrow[1] = { centerX - radius, centerY + radius };
+                            arrow[2] = { centerX + radius, centerY + radius };
+                            break;
+                        case East:
+                            arrow[0] = { centerX + radius, centerY };
+                            arrow[1] = { centerX - radius, centerY - radius };
+                            arrow[2] = { centerX - radius, centerY + radius };
+                            break;
+                        case South:
+                            arrow[0] = { centerX, centerY + radius };
+                            arrow[1] = { centerX - radius, centerY - radius };
+                            arrow[2] = { centerX + radius, centerY - radius };
+                            break;
+                        default:
+                            arrow[0] = { centerX - radius, centerY };
+                            arrow[1] = { centerX + radius, centerY - radius };
+                            arrow[2] = { centerX + radius, centerY + radius };
+                            break;
+                        }
+                        DrawPolygon(hdc, arrow, 3, RGB(250, 250, 250), RGB(35, 35, 35));
                     }
 
                     if (maze_[row][col].walls[North])

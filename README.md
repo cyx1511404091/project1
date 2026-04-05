@@ -9,6 +9,9 @@ The checked-in runnable [MazeGame.exe](/D:/codex/1/MazeGame.exe) in this workspa
 - DFS random perfect maze generation with guaranteed solvable layout
 - Double-buffered first-person maze presentation to prevent flashing
 - First-person play with visible left and right arms
+- Minimap player arrow showing current facing direction
+- Smooth turning transition instead of instant hard cuts
+- `Space` jump and `Ctrl` crouch controls
 - Start cell in the top-left corner and goal door in the bottom-right corner
 - Long-press movement and turning with strict wall collision
 - Reachable stars placed in the maze, each worth `1` score
@@ -49,6 +52,7 @@ You can change these values near the top of [src/main.cpp](/D:/codex/1/src/main.
 
 - `kMoveIntervalMs`
 - `kTurnIntervalMs`
+- `kJumpImpulse`
 - `kHintCost`
 
 ## Notes
