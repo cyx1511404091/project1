@@ -6,6 +6,8 @@ This project is a complete maze mini-game built with `C++` and the `EasyX` graph
 
 - Random perfect maze generation using DFS
 - Adjustable maze size in code, default is `25 x 25`
+- Start menu with a one-click `Start Game` button
+- Custom start button icon rendered directly in the game UI
 - Start cell in the top-left corner and goal cell in the bottom-right corner
 - Arrow-key player movement with strict wall collision
 - Real-time step counter and timer
@@ -31,6 +33,11 @@ This project is a complete maze mini-game built with `C++` and the `EasyX` graph
 3. Create an empty C++ project.
 4. Add [src/main.cpp](/D:/codex/1/src/main.cpp) to the project.
 5. Build and run.
+
+## One-Click Launch
+
+After you build the project, you can double-click [RunMazeGame.bat](/D:/codex/1/RunMazeGame.bat).
+It searches common Visual Studio output folders such as `x64\Release` and `Debug`, then launches the first game executable it finds.
 
 ## Tunable Constants
 
